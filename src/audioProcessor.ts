@@ -1,6 +1,6 @@
 import {setWasmPaths} from "@tensorflow/tfjs-backend-wasm"
 import * as ort from 'onnxruntime-web';
-import * as tf from '@tensorflow/tfjs';
+import * as tf from '@tensorflow/tfjs-core';
 import * as LibSampleRate from '@alexanderolsen/libsamplerate-js';
 
 ort.env.wasm.numThreads = 1;
@@ -13,27 +13,6 @@ await tf.setBackend('wasm');
 
 let vggishModelLoaded: boolean = false;
 let featureExtractorPath: string;
-
-async function init() {
-    try {
-        // Set the number of threads for ONNX Runtime Web WASM backend
-        ort.env.wasm.numThreads = 1;
-
-        // Set whether to load remote models for ONNX Runtime Web
-        ort.env.remoteModels = false;
-
-        // Set the WASM paths for ONNX Runtime Web
-        ort.env.wasm.wasmPaths = "https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/";
-
-        // Set the WASM paths for TensorFlow.js
-        tf.wasm.setWasmPaths('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-wasm/dist/');
-
-        // Set the TensorFlow.js backend to WASM
-        await tf.setBackend('wasm');
-    } catch (error) {
-        console.error('Error initializing TensorFlow:', error);
-    }
-}
 
 async function setFeatureExtractor(modelPath: string){
     featureExtractorPath = modelPath;
