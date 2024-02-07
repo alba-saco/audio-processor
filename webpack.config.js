@@ -1,10 +1,9 @@
 const path = require('path');
 const pathBrowserify = require('path-browserify');
 const CopyWebpackPlugin = require('copy-webpack-plugin');
-const TerserPlugin = require("terser-webpack-plugin");
 
 module.exports = {
-    mode: 'development',
+    mode: 'production',
     entry: './src/audioProcessor.js',
     output: {
         path: path.resolve(__dirname, 'dist'),
@@ -46,16 +45,5 @@ module.exports = {
             "path": require.resolve("path-browserify"),
         },
         modules: [path.resolve(__dirname, 'node_modules')],
-    },
-    optimization: {
-      minimizer: [
-        new TerserPlugin({
-          terserOptions: {
-            compress: {
-              unused: false,
-            }
-          }
-        })
-      ]
     }
   };
