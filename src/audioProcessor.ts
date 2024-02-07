@@ -445,11 +445,11 @@ async function preprocess(audioBuffer) {
         }
         const melBreakFrequencyHertz = 700.0;
         const melHighFrequencyQ = 1127.0;
-        const result = frequenciesHertz.map(frequency => melHighFrequencyQ * Math.log(1.0 + frequency / melBreakFrequencyHertz));
+        const result = frequenciesHertz.map((frequency: number) => melHighFrequencyQ * Math.log(1.0 + frequency / melBreakFrequencyHertz));
         return frequenciesHertz.length === 1 ? result[0] : result;
     }
 
-    async function stftMagnitude(signal, fftLength, hopLength, windowLength) {
+    async function stftMagnitude(signal, fftLength: number, hopLength: number, windowLength: number) {
         if (!signal || signal.length === 0) {
             console.error("Input signal is undefined or empty.");
             return null;
@@ -459,7 +459,7 @@ async function preprocess(audioBuffer) {
         const window = periodicHann(windowLength);
 
         const windowedFrames = frames.map(frameData => 
-            frameData.map((value, index) => value * window[index])
+            frameData.map((value, index: number) => value * window[index])
         );
 
         const inputTensor = tf.tensor(windowedFrames, [windowedFrames.length, windowedFrames[0].length], 'float32');
@@ -473,7 +473,7 @@ async function preprocess(audioBuffer) {
         return magnitudesArray;
     }
 
-    function frame(data, windowLength, hopLength) {
+    function frame(data, windowLength: number, hopLength: number) {
         const numSamples = data.length;
         const numFrames = 1 + Math.floor((numSamples - windowLength) / hopLength);
 
@@ -489,7 +489,7 @@ async function preprocess(audioBuffer) {
         return frames;
     }
 
-    function periodicHann(windowLength) {
+    function periodicHann(windowLength: number) {
         const window = new Array(windowLength);
         for (let i = 0; i < windowLength; i++) {
             window[i] = 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / windowLength);

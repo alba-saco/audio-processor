@@ -4,7 +4,7 @@ const CopyWebpackPlugin = require('copy-webpack-plugin');
 
 module.exports = {
     mode: 'production',
-    entry: './src/audioProcessor.js',
+    entry: './src/audioProcessor.ts',
     output: {
         path: path.resolve(__dirname, 'dist'),
         filename: 'bundle.js',
@@ -20,8 +20,8 @@ module.exports = {
     module: {
       rules: [
         {
-          test: /\.js$/,
-          use: 'babel-loader',
+          test: /\.ts$/,
+          use: 'ts-loader',
           exclude: /node_modules/,
         },
         {
