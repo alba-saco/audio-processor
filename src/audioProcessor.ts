@@ -14,33 +14,13 @@ await tf.setBackend('wasm');
 let vggishModelLoaded: boolean = false;
 let featureExtractorPath: string;
 
-async function init() {
-    try {
-        // Set the number of threads for ONNX Runtime Web WASM backend
-        ort.env.wasm.numThreads = 1;
-
-        // Set whether to load remote models for ONNX Runtime Web
-        ort.env.remoteModels = false;
-
-        // Set the WASM paths for ONNX Runtime Web
-        ort.env.wasm.wasmPaths = "https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/";
-
-        // Set the WASM paths for TensorFlow.js
-        tf.wasm.setWasmPaths('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-wasm/dist/');
-
-        // Set the TensorFlow.js backend to WASM
-        await tf.setBackend('wasm');
-    } catch (error) {
-        console.error('Error initializing TensorFlow:', error);
-    }
-}
 
 async function setFeatureExtractor(modelPath: string){
     featureExtractorPath = modelPath;
     vggishModelLoaded = true;
 }
 
-export async function process(audioBuffer: AudioBuffer) {
+async function process(audioBuffer: AudioBuffer) {
     console.log("process func")
     console.log(audioBuffer)
     const startTime = performance.now();
@@ -51,7 +31,7 @@ export async function process(audioBuffer: AudioBuffer) {
     }
 
     const preprocessedStartTime = performance.now();
-    const preprocessedData = await preprocess(audioBuffer);
+    const preprocessedData = (await preprocess(audioBuffer)) as tf.Tensor4D;
     const preprocessedEndTime = performance.now();
 
     console.log(`Time taken for preprocess: ${preprocessedEndTime - preprocessedStartTime} milliseconds`);
@@ -68,19 +48,28 @@ export async function process(audioBuffer: AudioBuffer) {
         const pprocModelPath = './pproc.onnx';
         const pprocSession = await ort.InferenceSession.create(pprocModelPath);
 
-        const ortOutputsTensor = tf.tensor(ortOutputsList);
+        let ortOutputsTensor;
+        if (ortOutputsList !== null) {
+            const ortOutputsArray = ortOutputsList.flat().map(Number);
+            ortOutputsTensor = tf.tensor(new Float32Array(ortOutputsArray)).reshape([ortOutputsList.length, 1, 1, 1]);
+        }
 
         console.log("ortOutputsTensor")
         console.log(ortOutputsTensor)
 
-        const pprocInputArray = Array.from(ortOutputsTensor.dataSync());
-        const pprocInputName = pprocSession.inputNames[0];
-        const pprocInputTensor = new ort.Tensor('float32', pprocInputArray, ortOutputsTensor.shape);
-        const pprocInputs = { [pprocInputName]: pprocInputTensor };
-        const pprocOutputs = await pprocSession.run(pprocInputs);
+        if (ortOutputsTensor !== undefined) {
+            const pprocInputArray = Array.from(ortOutputsTensor.dataSync());
+            const pprocInputName = pprocSession.inputNames[0];
+            const pprocInputTensor = new ort.Tensor('float32', pprocInputArray, ortOutputsTensor.shape);
+            const pprocInputs = { [pprocInputName]: pprocInputTensor };
+            const pprocOutputs = await pprocSession.run(pprocInputs);
 
-        const pprocOutput = pprocOutputs.output;
-        return pprocOutput;
+            const pprocOutput = pprocOutputs.output;
+            return pprocOutput;
+        } else {
+            console.log("Error: ortOutputsTensor is undefined.");
+            return null;
+        }
     } else {
         console.log("Error computing Log Mel Spectrogram.");
     }
@@ -147,11 +136,19 @@ async function preprocess(audioBuffer: AudioBuffer) {
             
             // data = (data.numberOfChannels > 1) ? mergeChannels(data) : data;
             console.log("Input data before mergeChannels:", data);
-            data = mergeChannels(data)
+            const mergedData = mergeChannels(data);
+            const audioCtx = new window.AudioContext();
+            const dataBuffer = audioCtx.createBuffer(1, mergedData.length, vggishParams.SAMPLE_RATE);
+            dataBuffer.getChannelData(0).set(mergedData);
+            data = dataBuffer;
 
             if (sampleRate !== vggishParams.SAMPLE_RATE) {
                 console.log("Resampling");
-                data = await resample(data, sampleRate, vggishParams.SAMPLE_RATE);
+                const resampledData = await resample(data.getChannelData(0), sampleRate, vggishParams.SAMPLE_RATE);
+                const audioCtx = new window.AudioContext();
+                const dataBuffer = audioCtx.createBuffer(1, resampledData.length, vggishParams.SAMPLE_RATE);
+                dataBuffer.getChannelData(0).set(resampledData);
+                data = dataBuffer;
                 console.log("post resample")
                 console.log(data)
 
@@ -162,14 +159,20 @@ async function preprocess(audioBuffer: AudioBuffer) {
                 // a.download = 'resampled-js.wav';
                 // a.click();
             }
-            const logMel = await computeLogMelSpectrogram(data, vggishParams.SAMPLE_RATE);
+            const logMel = await computeLogMelSpectrogram(data.getChannelData(0), vggishParams.SAMPLE_RATE);
             if (logMel) {      
                 const featuresSampleRate = 1.0 / vggishParams.STFT_HOP_LENGTH_SECONDS;
                 const exampleWindowLength = Math.round(vggishParams.EXAMPLE_WINDOW_SECONDS * featuresSampleRate);
                 const exampleHopLength = Math.round(vggishParams.EXAMPLE_HOP_SECONDS * featuresSampleRate);
-                const logMelExamples = frame(logMel, exampleWindowLength, exampleHopLength);
+                const logMelExamples = frame(new Float32Array(logMel.flat()), exampleWindowLength, exampleHopLength);
 
-                const logMelTensor = tf.tensor(logMelExamples, undefined, 'float32');
+                let concatenated = new Float32Array(logMelExamples.reduce((a, b) => a + b.length, 0));
+                let offset = 0;
+                for(let arr of logMelExamples) {
+                    concatenated.set(arr, offset);
+                    offset += arr.length;
+                }
+                const logMelTensor = tf.tensor(concatenated, undefined, 'float32');
 
                 const expandedTensor = logMelTensor.expandDims(1);
                 return expandedTensor;
@@ -282,7 +285,9 @@ async function preprocess(audioBuffer: AudioBuffer) {
         }
     }
 
+
     async function computeLogMelSpectrogram(data: Float32Array, audioSampleRate: number) {
+        let melSpectrogram: number[][] | null = null;
         try {
             const logOffset = vggishParams.LOG_OFFSET;
             const windowLengthSecs = vggishParams.STFT_WINDOW_LENGTH_SECONDS;
@@ -301,7 +306,17 @@ async function preprocess(audioBuffer: AudioBuffer) {
 
             if (spectrogram) {
                 console.log("Spectrogram calculated");
-                const melSpectrogram = await computeLogMelFeatures(spectrogram, audioSampleRate);
+                if (Array.isArray(spectrogram)) {
+                    function flattenArray(arr: any[]): any[] {
+                        return arr.reduce((flat, toFlatten) => {
+                            return flat.concat(Array.isArray(toFlatten) ? flattenArray(toFlatten) : toFlatten);
+                        }, []);
+                    }
+
+                    melSpectrogram = await computeLogMelFeatures([Array.from(flattenArray(spectrogram))], audioSampleRate);
+                } else {
+                    console.error("spectrogram is not an array.");
+                }
                 if (melSpectrogram) {
                     return melSpectrogram;
                 } else {
@@ -510,4 +525,4 @@ async function preprocess(audioBuffer: AudioBuffer) {
     }
 }
 
-export { setFeatureExtractor };
+export { setFeatureExtractor, process }

@@ -3,7 +3,8 @@ const pathBrowserify = require('path-browserify');
 const CopyWebpackPlugin = require('copy-webpack-plugin');
 
 module.exports = {
-    mode: 'production',
+    // mode: 'production',
+    mode: 'development',
     entry: './src/audioProcessor.ts',
     output: {
         path: path.resolve(__dirname, 'dist'),
@@ -45,5 +46,9 @@ module.exports = {
             "path": require.resolve("path-browserify"),
         },
         modules: [path.resolve(__dirname, 'node_modules')],
+    },
+    optimization: {
+      usedExports: true,
+      // minimize: false
     }
   };

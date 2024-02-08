@@ -1,6 +1,7 @@
 {
   "name": "onnx-audio-processor",
   "version": "1.0.0",
+  "sideEffects": ["./src/audioProcessor.ts"],
   "main": "dist/bundle.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
