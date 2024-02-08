@@ -9,8 +9,8 @@ ort.env.wasm.wasmPaths = "https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/";
 setWasmPaths(
     'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-wasm/dist/'
 );
-await tf.setBackend('wasm');
 
+let backendSet: boolean = false;
 let vggishModelLoaded: boolean = false;
 let featureExtractorPath: string;
 
@@ -23,6 +23,10 @@ async function setFeatureExtractor(modelPath: string){
 async function process(audioBuffer: AudioBuffer) {
     console.log("process func")
     console.log(audioBuffer)
+    if (!backendSet) {
+        await tf.setBackend('wasm');
+        backendSet = true;
+    }
     const startTime = performance.now();
 
     while (!vggishModelLoaded) {

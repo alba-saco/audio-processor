@@ -3,12 +3,11 @@ const pathBrowserify = require('path-browserify');
 const CopyWebpackPlugin = require('copy-webpack-plugin');
 
 module.exports = {
-    // mode: 'production',
-    mode: 'development',
+    mode: 'production',
     entry: './src/audioProcessor.ts',
     output: {
         path: path.resolve(__dirname, 'dist'),
-        filename: 'bundle.js',
+        filename: 'audioProcessor.js',
     },
     plugins: [
         new CopyWebpackPlugin({
@@ -41,14 +40,13 @@ module.exports = {
       ],
     },
     resolve: {
-        extensions: ['.js', '.wasm'],
+        extensions: ['.js', '.ts', '.wasm'],
         fallback: {
             "path": require.resolve("path-browserify"),
         },
         modules: [path.resolve(__dirname, 'node_modules')],
     },
     optimization: {
-      usedExports: true,
-      // minimize: false
+      chunkIds: 'total-size'
     }
   };

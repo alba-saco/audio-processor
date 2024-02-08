@@ -2,14 +2,15 @@
   "name": "onnx-audio-processor",
   "version": "1.0.0",
   "sideEffects": ["./src/audioProcessor.ts"],
-  "main": "dist/bundle.js",
+  "main": "dist/audioProcessor.js",
+  "types": "dist/audioProcessor.d.ts",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "build": "webpack --config webpack.config.js"
   },
   "keywords": [],
   "author": "",
-  "license": "ISC",
+  "license": "MIT",
   "description": "",
   "dependencies": {
     "@alexanderolsen/libsamplerate-js": "^2.1.1",

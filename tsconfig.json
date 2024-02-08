@@ -1,14 +1,16 @@
 {
     "compilerOptions": {
-        "target": "es2017",
-        "lib": ["es6", "dom", "es2019"],
-        "module": "esnext",
+        "target": "ES2021",
+        "lib": ["es6", "dom", "es2021"],
+        "module": "commonjs",
         "outDir": "./dist",
         "rootDir": "./src",
         "strict": true,
         "moduleResolution": "node",
         "esModuleInterop": true,
-        "types": []
+        "declaration": true,
+        "declarationMap": true,
+        "declarationDir": "dist"
     },
     "include": [
         "src/**/*.ts"
