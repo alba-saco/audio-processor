@@ -8,6 +8,10 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "build": "webpack --config webpack.config.js"
   },
+  "paths": [
+    "src",
+    "dist"
+  ],
   "keywords": [],
   "author": "",
   "license": "MIT",
