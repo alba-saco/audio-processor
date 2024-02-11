@@ -23,10 +23,10 @@ async function setFeatureExtractor(modelPath: string){
 async function process(audioBuffer: AudioBuffer) {
     console.log("process func")
     console.log(audioBuffer)
-    if (!backendSet) {
-        await tf.setBackend('wasm');
-        backendSet = true;
-    }
+    // if (!backendSet) {
+    //     await tf.setBackend('wasm');
+    //     backendSet = true;
+    // }
     const startTime = performance.now();
 
     while (!vggishModelLoaded) {
@@ -48,6 +48,9 @@ async function process(audioBuffer: AudioBuffer) {
         const inferenceEndTime = performance.now();
 
         console.log(`Time taken for inference in parallel: ${inferenceEndTime - inferenceStartTime} milliseconds`);
+
+        console.log("ortOutputsList")
+        console.log(ortOutputsList)
 
         const pprocModelPath = './pproc.onnx';
         const pprocSession = await ort.InferenceSession.create(pprocModelPath);
@@ -81,6 +84,8 @@ async function process(audioBuffer: AudioBuffer) {
 
 async function runInferenceParallel(inputData: tf.Tensor4D) {
     try {
+        console.log("input data to runInferenceParallel")
+        console.log(inputData)
         const session = await ort.InferenceSession.create(featureExtractorPath);
         
         const [batchSize, channels, height, width] = inputData.shape;
@@ -133,6 +138,8 @@ async function preprocess(audioBuffer: AudioBuffer) {
     };
 
     async function waveformToExamples(data: AudioBuffer, sampleRate: number) {
+        console.log("input data to waveformToExamples")
+        console.log(data)
         if (data && data.length) {
             console.log("in waveformToExamples")
             console.log(data)
@@ -153,6 +160,7 @@ async function preprocess(audioBuffer: AudioBuffer) {
                 const dataBuffer = audioCtx.createBuffer(1, resampledData.length, vggishParams.SAMPLE_RATE);
                 dataBuffer.getChannelData(0).set(resampledData);
                 data = dataBuffer;
+                // data = await resample(data, sampleRate, vggishParams.SAMPLE_RATE);
                 console.log("post resample")
                 console.log(data)
 
@@ -164,19 +172,22 @@ async function preprocess(audioBuffer: AudioBuffer) {
                 // a.click();
             }
             const logMel = await computeLogMelSpectrogram(data.getChannelData(0), vggishParams.SAMPLE_RATE);
-            if (logMel) {      
+            if (logMel) {   
+                console.log("logMel")
+                console.log(logMel)
                 const featuresSampleRate = 1.0 / vggishParams.STFT_HOP_LENGTH_SECONDS;
                 const exampleWindowLength = Math.round(vggishParams.EXAMPLE_WINDOW_SECONDS * featuresSampleRate);
                 const exampleHopLength = Math.round(vggishParams.EXAMPLE_HOP_SECONDS * featuresSampleRate);
-                const logMelExamples = frame(new Float32Array(logMel.flat()), exampleWindowLength, exampleHopLength);
+                console.log("calling frame(logMel)")
+                console.log("windowlength and hoplength")
+                console.log(exampleWindowLength)
+                console.log(exampleHopLength)
+                const logMelExamples = frame3d(logMel, exampleWindowLength, exampleHopLength);
 
-                let concatenated = new Float32Array(logMelExamples.reduce((a, b) => a + b.length, 0));
-                let offset = 0;
-                for(let arr of logMelExamples) {
-                    concatenated.set(arr, offset);
-                    offset += arr.length;
-                }
-                const logMelTensor = tf.tensor(concatenated, undefined, 'float32');
+                console.log("logMelExamples")
+                console.log(logMelExamples)
+
+                const logMelTensor = tf.tensor(logMelExamples, undefined, 'float32');
 
                 const expandedTensor = logMelTensor.expandDims(1);
                 return expandedTensor;
@@ -291,7 +302,9 @@ async function preprocess(audioBuffer: AudioBuffer) {
 
 
     async function computeLogMelSpectrogram(data: Float32Array, audioSampleRate: number) {
-        let melSpectrogram: number[][] | null = null;
+        console.log("data in computeLogMelSpectrogram")
+        console.log(data)
+        // let melSpectrogram: number[][] | null = null;
         try {
             const logOffset = vggishParams.LOG_OFFSET;
             const windowLengthSecs = vggishParams.STFT_WINDOW_LENGTH_SECONDS;
@@ -310,17 +323,9 @@ async function preprocess(audioBuffer: AudioBuffer) {
 
             if (spectrogram) {
                 console.log("Spectrogram calculated");
-                if (Array.isArray(spectrogram)) {
-                    function flattenArray(arr: any[]): any[] {
-                        return arr.reduce((flat, toFlatten) => {
-                            return flat.concat(Array.isArray(toFlatten) ? flattenArray(toFlatten) : toFlatten);
-                        }, []);
-                    }
+                console.log(spectrogram)
+                const melSpectrogram = await computeLogMelFeatures(spectrogram, audioSampleRate);
 
-                    melSpectrogram = await computeLogMelFeatures([Array.from(flattenArray(spectrogram))], audioSampleRate);
-                } else {
-                    console.error("spectrogram is not an array.");
-                }
                 if (melSpectrogram) {
                     return melSpectrogram;
                 } else {
@@ -468,17 +473,17 @@ async function preprocess(audioBuffer: AudioBuffer) {
         return result;
     }
 
-    async function stftMagnitude(signal: Float32Array, fftLength: number, hopLength: number, windowLength: number) {
+    async function stftMagnitude(signal: Float32Array, fftLength: number, hopLength: number, windowLength: number): Promise<number[][] | null> {
         if (!signal || signal.length === 0) {
             console.error("Input signal is undefined or empty.");
             return null;
         }
 
-        const frames = frame(signal, windowLength, hopLength);
+        const frames = frame2d(signal, windowLength, hopLength);
         const window = periodicHann(windowLength);
 
-        const windowedFrames = frames.map(frameData => 
-            frameData.map((value, index: number) => value * window[index])
+        const windowedFrames = frames.map((frameData: number[]) => 
+            frameData.map((value: number, index: number) => value * window[index])
         );
 
         const inputTensor = tf.tensor(windowedFrames, [windowedFrames.length, windowedFrames[0].length], 'float32');
@@ -487,24 +492,62 @@ async function preprocess(audioBuffer: AudioBuffer) {
 
         const magnitudes = tf.abs(complexResult);
 
-        const magnitudesArray = await magnitudes.array();
+        const magnitudesArray = await magnitudes.array() as number[][];
 
         return magnitudesArray;
     }
 
-    function frame(data: Float32Array, windowLength: number, hopLength: number) {
+
+    function frame2d(data: Float32Array, windowLength: number, hopLength: number): number[][] {
+        console.log("in frame2d");
+        console.log(data);
+    
         const numSamples = data.length;
-        const numFrames = 1 + Math.floor((numSamples - windowLength) / hopLength);
-
-        const frames = [];
-
+        console.log("Number of samples:", numSamples);
+    
+        const numFrames = Math.floor((numSamples - windowLength) / hopLength) + 1;
+        console.log("Number of frames:", numFrames);
+    
+        const frames: number[][] = [];
+        
+        console.log("Type of data:", typeof data);
+            
         for (let i = 0; i < numFrames; i++) {
             const start = i * hopLength;
             const end = start + windowLength;
-            const frameData = data.slice(start, end);
+            const frameData = Array.from(data.slice(start, end));
             frames.push(frameData);
         }
         
+        console.log("frames output");
+        console.log(frames);
+    
+        return frames;
+    }
+
+    function frame3d(data: number[][], windowLength: number, hopLength: number): number[][][] {
+        console.log("in frame3d");
+        console.log(data);
+    
+        const numSamples = data.length;
+        console.log("Number of samples:", numSamples);
+    
+        const numFrames = Math.floor((numSamples - windowLength) / hopLength) + 1;
+        console.log("Number of frames:", numFrames);
+    
+        const frames: number[][][] = [];
+        
+        console.log("Type of data:", typeof data);
+        for (let i = 0; i < numFrames; i++) {
+            const start = i * hopLength;
+            const end = start + windowLength;
+            const frameData = data.slice(start, end)
+            frames.push(frameData); // Convert flattened frameData to number[]
+        }
+    
+        console.log("frames output");
+        console.log(frames);
+    
         return frames;
     }
 
@@ -520,6 +563,8 @@ async function preprocess(audioBuffer: AudioBuffer) {
         const spectrogram = await waveformToExamples(audioBuffer, audioBuffer.sampleRate);
 
         if (spectrogram) {
+            console.log("preprocess output")
+            console.log(spectrogram)
             return spectrogram;
         } else {
             console.log("Error computing Log Mel Spectrogram.");

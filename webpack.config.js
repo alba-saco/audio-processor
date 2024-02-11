@@ -8,6 +8,8 @@ module.exports = {
     output: {
         path: path.resolve(__dirname, 'dist'),
         filename: 'audioProcessor.js',
+        library: 'AudioProcessor',
+        libraryTarget: 'umd',
     },
     plugins: [
         new CopyWebpackPlugin({
