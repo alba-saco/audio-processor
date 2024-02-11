@@ -1,7 +1,6 @@
 import {setWasmPaths} from "@tensorflow/tfjs-backend-wasm"
 import * as ort from 'onnxruntime-web';
 import * as tf from '@tensorflow/tfjs';
-import * as LibSampleRate from '@alexanderolsen/libsamplerate-js';
 
 ort.env.wasm.numThreads = 1;
 ort.env.remoteModels = false;
@@ -9,24 +8,40 @@ ort.env.wasm.wasmPaths = "https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/";
 setWasmPaths(
     'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-wasm/dist/'
 );
+// await tf.setBackend('wasm');
 
-let backendSet: boolean = false;
-let vggishModelLoaded: boolean = false;
-let featureExtractorPath: string;
+let vggishModelLoaded = false;
+let featureExtractorPath;
 
+async function init() {
+    try {
+        // Set the number of threads for ONNX Runtime Web WASM backend
+        ort.env.wasm.numThreads = 1;
 
-async function setFeatureExtractor(modelPath: string){
+        // Set whether to load remote models for ONNX Runtime Web
+        ort.env.remoteModels = false;
+
+        // Set the WASM paths for ONNX Runtime Web
+        ort.env.wasm.wasmPaths = "https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/";
+
+        // Set the WASM paths for TensorFlow.js
+        tf.wasm.setWasmPaths('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-wasm/dist/');
+
+        // Set the TensorFlow.js backend to WASM
+        await tf.setBackend('wasm');
+    } catch (error) {
+        console.error('Error initializing TensorFlow:', error);
+    }
+}
+
+async function setFeatureExtractor(modelPath){
     featureExtractorPath = modelPath;
     vggishModelLoaded = true;
 }
 
-async function process(audioBuffer: AudioBuffer) {
+export async function process(audioBuffer) {
     console.log("process func")
     console.log(audioBuffer)
-    // if (!backendSet) {
-    //     await tf.setBackend('wasm');
-    //     backendSet = true;
-    // }
     const startTime = performance.now();
 
     while (!vggishModelLoaded) {
@@ -35,7 +50,7 @@ async function process(audioBuffer: AudioBuffer) {
     }
 
     const preprocessedStartTime = performance.now();
-    const preprocessedData = (await preprocess(audioBuffer)) as tf.Tensor4D;
+    const preprocessedData = await preprocess(audioBuffer);
     const preprocessedEndTime = performance.now();
 
     console.log(`Time taken for preprocess: ${preprocessedEndTime - preprocessedStartTime} milliseconds`);
@@ -49,43 +64,30 @@ async function process(audioBuffer: AudioBuffer) {
 
         console.log(`Time taken for inference in parallel: ${inferenceEndTime - inferenceStartTime} milliseconds`);
 
-        console.log("ortOutputsList")
-        console.log(ortOutputsList)
-
         const pprocModelPath = './pproc.onnx';
         const pprocSession = await ort.InferenceSession.create(pprocModelPath);
 
-        let ortOutputsTensor;
-        if (ortOutputsList !== null) {
-            const ortOutputsArray = ortOutputsList.flat().map(Number);
-            ortOutputsTensor = tf.tensor(new Float32Array(ortOutputsArray)).reshape([ortOutputsList.length, 1, 1, 1]);
-        }
+        const ortOutputsTensor = tf.tensor(ortOutputsList);
 
         console.log("ortOutputsTensor")
         console.log(ortOutputsTensor)
 
-        if (ortOutputsTensor !== undefined) {
-            const pprocInputArray = Array.from(ortOutputsTensor.dataSync());
-            const pprocInputName = pprocSession.inputNames[0];
-            const pprocInputTensor = new ort.Tensor('float32', pprocInputArray, ortOutputsTensor.shape);
-            const pprocInputs = { [pprocInputName]: pprocInputTensor };
-            const pprocOutputs = await pprocSession.run(pprocInputs);
+        const pprocInputArray = Array.from(ortOutputsTensor.dataSync());
+        const pprocInputName = pprocSession.inputNames[0];
+        const pprocInputTensor = new ort.Tensor('float32', pprocInputArray, ortOutputsTensor.shape);
+        const pprocInputs = { [pprocInputName]: pprocInputTensor };
+        const pprocOutputs = await pprocSession.run(pprocInputs);
 
-            const pprocOutput = pprocOutputs.output;
-            return pprocOutput;
-        } else {
-            console.log("Error: ortOutputsTensor is undefined.");
-            return null;
-        }
+        const pprocOutput = pprocOutputs.output;
+        processingFile = false;
+        return pprocOutput;
     } else {
         console.log("Error computing Log Mel Spectrogram.");
     }
 }
 
-async function runInferenceParallel(inputData: tf.Tensor4D) {
+async function runInferenceParallel(inputData) {
     try {
-        console.log("input data to runInferenceParallel")
-        console.log(inputData)
         const session = await ort.InferenceSession.create(featureExtractorPath);
         
         const [batchSize, channels, height, width] = inputData.shape;
@@ -107,7 +109,7 @@ async function runInferenceParallel(inputData: tf.Tensor4D) {
 
                 const results = await session.run(feeds);
                 const outputTensor = results.embeddings;
-                const outputArray = [ ...outputTensor.data ];
+                const outputArray = Array.from(outputTensor.data);
 
                 return outputArray;
             })();
@@ -124,7 +126,7 @@ async function runInferenceParallel(inputData: tf.Tensor4D) {
     }
 }
 
-async function preprocess(audioBuffer: AudioBuffer) {
+async function preprocess(audioBuffer) {
     const vggishParams = {
         SAMPLE_RATE: 16000,
         STFT_WINDOW_LENGTH_SECONDS: 0.025,
@@ -137,9 +139,7 @@ async function preprocess(audioBuffer: AudioBuffer) {
         EXAMPLE_HOP_SECONDS: 0.96,
     };
 
-    async function waveformToExamples(data: AudioBuffer, sampleRate: number) {
-        console.log("input data to waveformToExamples")
-        console.log(data)
+    async function waveformToExamples(data, sampleRate) {
         if (data && data.length) {
             console.log("in waveformToExamples")
             console.log(data)
@@ -147,20 +147,11 @@ async function preprocess(audioBuffer: AudioBuffer) {
             
             // data = (data.numberOfChannels > 1) ? mergeChannels(data) : data;
             console.log("Input data before mergeChannels:", data);
-            const mergedData = mergeChannels(data);
-            const audioCtx = new window.AudioContext();
-            const dataBuffer = audioCtx.createBuffer(1, mergedData.length, vggishParams.SAMPLE_RATE);
-            dataBuffer.getChannelData(0).set(mergedData);
-            data = dataBuffer;
+            data = mergeChannels(data)
 
             if (sampleRate !== vggishParams.SAMPLE_RATE) {
                 console.log("Resampling");
-                const resampledData = await resample(data.getChannelData(0), sampleRate, vggishParams.SAMPLE_RATE);
-                const audioCtx = new window.AudioContext();
-                const dataBuffer = audioCtx.createBuffer(1, resampledData.length, vggishParams.SAMPLE_RATE);
-                dataBuffer.getChannelData(0).set(resampledData);
-                data = dataBuffer;
-                // data = await resample(data, sampleRate, vggishParams.SAMPLE_RATE);
+                data = await resample(data, sampleRate, vggishParams.SAMPLE_RATE);
                 console.log("post resample")
                 console.log(data)
 
@@ -171,21 +162,12 @@ async function preprocess(audioBuffer: AudioBuffer) {
                 // a.download = 'resampled-js.wav';
                 // a.click();
             }
-            const logMel = await computeLogMelSpectrogram(data.getChannelData(0), vggishParams.SAMPLE_RATE);
-            if (logMel) {   
-                console.log("logMel")
-                console.log(logMel)
+            const logMel = await computeLogMelSpectrogram(data, vggishParams.SAMPLE_RATE);
+            if (logMel) {      
                 const featuresSampleRate = 1.0 / vggishParams.STFT_HOP_LENGTH_SECONDS;
                 const exampleWindowLength = Math.round(vggishParams.EXAMPLE_WINDOW_SECONDS * featuresSampleRate);
                 const exampleHopLength = Math.round(vggishParams.EXAMPLE_HOP_SECONDS * featuresSampleRate);
-                console.log("calling frame(logMel)")
-                console.log("windowlength and hoplength")
-                console.log(exampleWindowLength)
-                console.log(exampleHopLength)
-                const logMelExamples = frame3d(logMel, exampleWindowLength, exampleHopLength);
-
-                console.log("logMelExamples")
-                console.log(logMelExamples)
+                const logMelExamples = frame(logMel, exampleWindowLength, exampleHopLength);
 
                 const logMelTensor = tf.tensor(logMelExamples, undefined, 'float32');
 
@@ -201,7 +183,7 @@ async function preprocess(audioBuffer: AudioBuffer) {
     }
 
 
-    function createWavBlob(data: Float32Array, sampleRate: number) {
+    function createWavBlob(data, sampleRate) {
         const numChannels = 1;
         const bitsPerSample = 16;
         const byteRate = sampleRate * numChannels * (bitsPerSample / 8);
@@ -247,7 +229,7 @@ async function preprocess(audioBuffer: AudioBuffer) {
         return new Blob([buffer], { type: 'audio/wav' });
     }
 
-    function mergeChannels(audioBuffer: AudioBuffer): Float32Array {
+    function mergeChannels(audioBuffer) {
         console.log("merging channels")
         const numChannels = audioBuffer.numberOfChannels;
         const numSamples = audioBuffer.length;
@@ -259,7 +241,7 @@ async function preprocess(audioBuffer: AudioBuffer) {
             channels.push(audioBuffer.getChannelData(i));
         }
 
-        const merged = new Float32Array(numSamples).fill(0);
+        const merged = new Array(numSamples).fill(0);
 
         for (let i = 0; i < numChannels; i++) {
             for (let j = 0; j < numSamples; j++) {
@@ -271,7 +253,7 @@ async function preprocess(audioBuffer: AudioBuffer) {
         return merged;
     }
 
-    async function resample(data: Float32Array, inputSampleRate: number, outputSampleRate: number) {
+    async function resample(data, inputSampleRate, outputSampleRate) {
         try {
             console.log("in resample")
             console.log(data)
@@ -300,11 +282,7 @@ async function preprocess(audioBuffer: AudioBuffer) {
         }
     }
 
-
-    async function computeLogMelSpectrogram(data: Float32Array, audioSampleRate: number) {
-        console.log("data in computeLogMelSpectrogram")
-        console.log(data)
-        // let melSpectrogram: number[][] | null = null;
+    async function computeLogMelSpectrogram(data, audioSampleRate) {
         try {
             const logOffset = vggishParams.LOG_OFFSET;
             const windowLengthSecs = vggishParams.STFT_WINDOW_LENGTH_SECONDS;
@@ -323,9 +301,7 @@ async function preprocess(audioBuffer: AudioBuffer) {
 
             if (spectrogram) {
                 console.log("Spectrogram calculated");
-                console.log(spectrogram)
                 const melSpectrogram = await computeLogMelFeatures(spectrogram, audioSampleRate);
-
                 if (melSpectrogram) {
                     return melSpectrogram;
                 } else {
@@ -342,7 +318,7 @@ async function preprocess(audioBuffer: AudioBuffer) {
         }
     }
 
-    async function computeLogMelFeatures(spectrogram: number[][], audioSampleRate: number) {
+    async function computeLogMelFeatures(spectrogram, audioSampleRate) {
         try {
             const melSpectrogram = await melSpectrogramFromSpectrogram(
                 spectrogram,
@@ -364,7 +340,7 @@ async function preprocess(audioBuffer: AudioBuffer) {
         }
     }
 
-    async function melSpectrogramFromSpectrogram(spectrogram: number[][], audioSampleRate: number, windowLengthSecs: number, hopLengthSecs: number, numMelBins: number) {
+    async function melSpectrogramFromSpectrogram(spectrogram, audioSampleRate, windowLengthSecs, hopLengthSecs, numMelBins) {
         try {
             if (!spectrogram || !spectrogram.length) {
                 console.log("Input spectrogram is undefined or has no length.");
@@ -400,7 +376,7 @@ async function preprocess(audioBuffer: AudioBuffer) {
         }
     }
 
-    function applyMelMatrix(frameData: number[], melMatrix: number[][]) {
+    function applyMelMatrix(frameData, melMatrix) {
         const melFrame = new Array(melMatrix[0].length).fill(0);
 
         for (let i = 0; i < melMatrix[0].length; i++) {
@@ -412,7 +388,7 @@ async function preprocess(audioBuffer: AudioBuffer) {
         return melFrame;
     }
 
-    function applyLogOffset(melSpectrogram: number[][], logOffset: number) {
+    function applyLogOffset(melSpectrogram, logOffset) {
         const logMelSpectrogram = melSpectrogram.map(melFrame => {
             const logFrame = melFrame.map(value => Math.log(Math.max(value, logOffset)));
             return logFrame;
@@ -421,12 +397,12 @@ async function preprocess(audioBuffer: AudioBuffer) {
         return logMelSpectrogram;
     }
 
-    function linspace(start: number, end: number, numPoints: number) {
+    function linspace(start, end, numPoints) {
         const step = (end - start) / (numPoints - 1);
         return Array.from({ length: numPoints }, (_, i) => start + step * i);
     }
 
-    async function spectrogramToMelMatrix(numMelBins: number, numSpectrogramBins: number, audioSampleRate: number, lowerEdgeHertz: number, upperEdgeHertz: number) {
+    async function spectrogramToMelMatrix(numMelBins, numSpectrogramBins, audioSampleRate, lowerEdgeHertz, upperEdgeHertz) {
         try {
             const nyquistHertz = audioSampleRate / 2;
             if (lowerEdgeHertz < 0.0 || lowerEdgeHertz >= upperEdgeHertz || upperEdgeHertz > nyquistHertz) {
@@ -439,7 +415,7 @@ async function preprocess(audioBuffer: AudioBuffer) {
             const lowerEdgeMel = hertzToMel(lowerEdgeHertz);
             const upperEdgeMel = hertzToMel(upperEdgeHertz);
 
-            const bandEdgesMel = linspace(lowerEdgeMel[0], upperEdgeMel[0], numMelBins + 2);
+            const bandEdgesMel = linspace(lowerEdgeMel, upperEdgeMel, numMelBins + 2);
 
             const melWeightsMatrix = Array.from({ length: numSpectrogramBins }, (_, i) => {
                 return Array.from({ length: numMelBins }, (_, j) => {
@@ -463,27 +439,27 @@ async function preprocess(audioBuffer: AudioBuffer) {
         }
     }
 
-    function hertzToMel(frequenciesHertz: number[] | number) {
+    function hertzToMel(frequenciesHertz) {
         if (!Array.isArray(frequenciesHertz)) {
             frequenciesHertz = [frequenciesHertz];
         }
         const melBreakFrequencyHertz = 700.0;
         const melHighFrequencyQ = 1127.0;
-        const result = frequenciesHertz.map((frequency: number) => melHighFrequencyQ * Math.log(1.0 + frequency / melBreakFrequencyHertz));
-        return result;
+        const result = frequenciesHertz.map(frequency => melHighFrequencyQ * Math.log(1.0 + frequency / melBreakFrequencyHertz));
+        return frequenciesHertz.length === 1 ? result[0] : result;
     }
 
-    async function stftMagnitude(signal: Float32Array, fftLength: number, hopLength: number, windowLength: number): Promise<number[][] | null> {
+    async function stftMagnitude(signal, fftLength, hopLength, windowLength) {
         if (!signal || signal.length === 0) {
             console.error("Input signal is undefined or empty.");
             return null;
         }
 
-        const frames = frame2d(signal, windowLength, hopLength);
+        const frames = frame(signal, windowLength, hopLength);
         const window = periodicHann(windowLength);
 
-        const windowedFrames = frames.map((frameData: number[]) => 
-            frameData.map((value: number, index: number) => value * window[index])
+        const windowedFrames = frames.map(frameData => 
+            frameData.map((value, index) => value * window[index])
         );
 
         const inputTensor = tf.tensor(windowedFrames, [windowedFrames.length, windowedFrames[0].length], 'float32');
@@ -492,66 +468,28 @@ async function preprocess(audioBuffer: AudioBuffer) {
 
         const magnitudes = tf.abs(complexResult);
 
-        const magnitudesArray = await magnitudes.array() as number[][];
+        const magnitudesArray = await magnitudes.array();
 
         return magnitudesArray;
     }
 
-
-    function frame2d(data: Float32Array, windowLength: number, hopLength: number): number[][] {
-        console.log("in frame2d");
-        console.log(data);
-    
+    function frame(data, windowLength, hopLength) {
         const numSamples = data.length;
-        console.log("Number of samples:", numSamples);
-    
-        const numFrames = Math.floor((numSamples - windowLength) / hopLength) + 1;
-        console.log("Number of frames:", numFrames);
-    
-        const frames: number[][] = [];
-        
-        console.log("Type of data:", typeof data);
-            
+        const numFrames = 1 + Math.floor((numSamples - windowLength) / hopLength);
+
+        const frames = [];
+
         for (let i = 0; i < numFrames; i++) {
             const start = i * hopLength;
             const end = start + windowLength;
-            const frameData = Array.from(data.slice(start, end));
+            const frameData = data.slice(start, end);
             frames.push(frameData);
         }
         
-        console.log("frames output");
-        console.log(frames);
-    
         return frames;
     }
 
-    function frame3d(data: number[][], windowLength: number, hopLength: number): number[][][] {
-        console.log("in frame3d");
-        console.log(data);
-    
-        const numSamples = data.length;
-        console.log("Number of samples:", numSamples);
-    
-        const numFrames = Math.floor((numSamples - windowLength) / hopLength) + 1;
-        console.log("Number of frames:", numFrames);
-    
-        const frames: number[][][] = [];
-        
-        console.log("Type of data:", typeof data);
-        for (let i = 0; i < numFrames; i++) {
-            const start = i * hopLength;
-            const end = start + windowLength;
-            const frameData = data.slice(start, end)
-            frames.push(frameData); // Convert flattened frameData to number[]
-        }
-    
-        console.log("frames output");
-        console.log(frames);
-    
-        return frames;
-    }
-
-    function periodicHann(windowLength: number) {
+    function periodicHann(windowLength) {
         const window = new Array(windowLength);
         for (let i = 0; i < windowLength; i++) {
             window[i] = 0.5 - 0.5 * Math.cos((2 * Math.PI * i) / windowLength);
@@ -563,8 +501,6 @@ async function preprocess(audioBuffer: AudioBuffer) {
         const spectrogram = await waveformToExamples(audioBuffer, audioBuffer.sampleRate);
 
         if (spectrogram) {
-            console.log("preprocess output")
-            console.log(spectrogram)
             return spectrogram;
         } else {
             console.log("Error computing Log Mel Spectrogram.");
@@ -574,4 +510,4 @@ async function preprocess(audioBuffer: AudioBuffer) {
     }
 }
 
-export { setFeatureExtractor, process }
+export { setFeatureExtractor };

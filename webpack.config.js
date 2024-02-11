@@ -4,12 +4,10 @@ const CopyWebpackPlugin = require('copy-webpack-plugin');
 
 module.exports = {
     mode: 'production',
-    entry: './src/audioProcessor.ts',
+    entry: './src/audioProcessor.js',
     output: {
         path: path.resolve(__dirname, 'dist'),
-        filename: 'audioProcessor.js',
-        library: 'AudioProcessor',
-        libraryTarget: 'umd',
+        filename: 'bundle.js',
     },
     plugins: [
         new CopyWebpackPlugin({
@@ -22,8 +20,8 @@ module.exports = {
     module: {
       rules: [
         {
-          test: /\.ts$/,
-          use: 'ts-loader',
+          test: /\.js$/,
+          use: 'babel-loader',
           exclude: /node_modules/,
         },
         {
@@ -42,13 +40,10 @@ module.exports = {
       ],
     },
     resolve: {
-        extensions: ['.js', '.ts', '.wasm'],
+        extensions: ['.js', '.wasm'],
         fallback: {
             "path": require.resolve("path-browserify"),
         },
         modules: [path.resolve(__dirname, 'node_modules')],
-    },
-    optimization: {
-      chunkIds: 'total-size'
     }
   };
