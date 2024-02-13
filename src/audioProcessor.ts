@@ -13,7 +13,11 @@ setWasmPaths(
 let backendSet: boolean = false;
 let vggishModelLoaded: boolean = false;
 let featureExtractorPath: string;
+let classifierPath: string;
 
+function setClassifierPath(modelPath: string) {
+    classifierPath = modelPath;
+}
 
 async function setFeatureExtractor(modelPath: string){
     featureExtractorPath = modelPath;
@@ -44,31 +48,33 @@ async function process(audioBuffer: AudioBuffer) {
 
     if (preprocessedData) {
         const inferenceStartTime = performance.now();
-        const ortOutputsList = await runInferenceParallel(preprocessedData);
+        const ortOutputsList = await runInferenceSequence(preprocessedData);
         const inferenceEndTime = performance.now();
 
-        console.log(`Time taken for inference in parallel: ${inferenceEndTime - inferenceStartTime} milliseconds`);
+        console.log(`Time taken for VGGish inference: ${inferenceEndTime - inferenceStartTime} milliseconds`);
 
         console.log("ortOutputsList")
         console.log(ortOutputsList)
 
-        const pprocModelPath = './pproc.onnx';
+        const pprocModelPath = '../pproc.onnx';
         const pprocSession = await ort.InferenceSession.create(pprocModelPath);
 
         let ortOutputsTensor;
-        if (ortOutputsList !== null) {
-            const ortOutputsArray = ortOutputsList.flat().map(Number);
-            ortOutputsTensor = tf.tensor(new Float32Array(ortOutputsArray)).reshape([ortOutputsList.length, 1, 1, 1]);
+        if (ortOutputsList) {
+            console.log("getting tensor")
+            ortOutputsTensor = tf.tensor(ortOutputsList);
         }
 
         console.log("ortOutputsTensor")
         console.log(ortOutputsTensor)
 
         if (ortOutputsTensor !== undefined) {
+            console.log("inside conditional")
             const pprocInputArray = Array.from(ortOutputsTensor.dataSync());
             const pprocInputName = pprocSession.inputNames[0];
             const pprocInputTensor = new ort.Tensor('float32', pprocInputArray, ortOutputsTensor.shape);
             const pprocInputs = { [pprocInputName]: pprocInputTensor };
+            console.log("running pproc inference")
             const pprocOutputs = await pprocSession.run(pprocInputs);
 
             const pprocOutput = pprocOutputs.output;
@@ -82,40 +88,56 @@ async function process(audioBuffer: AudioBuffer) {
     }
 }
 
-async function runInferenceParallel(inputData: tf.Tensor4D) {
+async function runClassifier(inputData: ort.Tensor) {
+    const bgSession = await ort.InferenceSession.create(classifierPath);
+
+    const bgInputArray = inputData.data instanceof Float32Array ? Array.from(new Float32Array(inputData.data.buffer)) : [];
+    const bgInputName = bgSession.inputNames[0];
+
+    const bgInputTensor = new ort.Tensor('float32', bgInputArray, inputData.dims);
+    const bgInputs = { [bgInputName]: bgInputTensor };
+    const bgOutput = await bgSession.run(bgInputs);
+    if (!bgOutput) {
+        throw new Error('bgOutput is null or undefined');
+    }
+
+    console.log("bgOutput")
+    console.log(bgOutput);
+
+    return bgOutput
+}
+
+async function runInferenceSequence(inputData: tf.Tensor4D): Promise<number[][] | null> {
     try {
-        console.log("input data to runInferenceParallel")
+        console.log("input data to runInferenceSequence")
         console.log(inputData)
         const session = await ort.InferenceSession.create(featureExtractorPath);
         
         const [batchSize, channels, height, width] = inputData.shape;
 
-        const promises = [];
+        const ortOutputsList: number[][] = [];
 
         for (let batch = 0; batch < batchSize; batch++) {
-            const promise = (async () => {
-                const input_data_batch = inputData.slice([batch, 0, 0, 0], [1, 1, height, width]);
-                const input_data_onnx = input_data_batch.transpose([0, 2, 1, 3]).reshape([1, 64, 96]);
-                const inputArray = Array.from(input_data_onnx.dataSync());
+            const input_data_batch = inputData.slice([batch, 0, 0, 0], [1, 1, height, width]);
+            const input_data_onnx = input_data_batch.transpose([0, 2, 1, 3]).reshape([1, 64, 96]);
+            const inputArray = Array.from(input_data_onnx.dataSync());
 
-                const inputDims = [1, 64, 96];
-                const inputTensor = new ort.Tensor('float32', inputArray, inputDims);
+            const inputDims = [1, 64, 96];
+            const inputTensor = new ort.Tensor('float32', inputArray, inputDims);
 
-                const feeds = {
-                    'melspectrogram': inputTensor,
-                };
+            const feeds = {
+                'melspectrogram': inputTensor,
+            };
 
-                const results = await session.run(feeds);
-                const outputTensor = results.embeddings;
-                const outputArray = [ ...outputTensor.data ];
+            const results = await session.run(feeds);
+            const outputTensor = results.embeddings;
+            let outputArray: number[] = [];
+            for (let i = 0; i < outputTensor.data.length; i++) {
+                outputArray.push(Number(outputTensor.data[i]));
+            }
 
-                return outputArray;
-            })();
-
-            promises.push(promise);
+            ortOutputsList.push(outputArray);
         }
-
-        const ortOutputsList = await Promise.all(promises);
 
         return ortOutputsList;
     } catch (error) {
@@ -574,4 +596,4 @@ async function preprocess(audioBuffer: AudioBuffer) {
     }
 }
 
-export { setFeatureExtractor, process }
+export { setFeatureExtractor, process, setClassifierPath, runClassifier }
