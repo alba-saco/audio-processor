@@ -1,5 +1,5 @@
 {
-  "name": "onnx-audio-processor",
+  "name": "web-audio-classifier",
   "version": "1.0.0",
   "sideEffects": ["./src/audioProcessor.ts"],
   "main": "dist/audioProcessor.js",
