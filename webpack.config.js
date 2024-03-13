@@ -15,7 +15,8 @@ module.exports = {
         new CopyWebpackPlugin({
             patterns: [
                 { from: 'node_modules/onnxruntime-web/dist/**/*.wasm', to: 'onnxruntime-web/dist/[name][ext]' },
-                { from: 'node_modules/@tensorflow/tfjs-backend-wasm/dist/*.wasm', to: '@tensorflow/tfjs-backend-wasm/[name][ext]'}
+                { from: 'node_modules/@tensorflow/tfjs-backend-wasm/dist/*.wasm', to: '@tensorflow/tfjs-backend-wasm/[name][ext]'},
+                { from: 'node_modules/onnxruntime-web/dist/ort.webgpu.min.js', to: 'onnxruntime-web/dist/' }
             ],
         }),
     ],
@@ -24,6 +25,11 @@ module.exports = {
         {
           test: /\.ts$/,
           use: 'ts-loader',
+          exclude: /node_modules/,
+        },
+        {
+          test: /\.d\.ts$/, // Handle declaration files
+          use: 'raw-loader', // Use raw-loader to handle declaration files
           exclude: /node_modules/,
         },
         {

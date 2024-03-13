@@ -1,14 +1,25 @@
 import {setWasmPaths} from "@tensorflow/tfjs-backend-wasm"
+
 import * as ort from 'onnxruntime-web';
+// import * as ortCore from 'onnxruntime-web';
+// import * as ort from 'onnxruntime-web/webgpu';
 import * as tf from '@tensorflow/tfjs';
 import * as LibSampleRate from '@alexanderolsen/libsamplerate-js';
+
+// import { Tensor, InferenceSession } from 'onnxruntime-web/webgpu';
 
 ort.env.wasm.numThreads = 1;
 ort.env.remoteModels = false;
 ort.env.wasm.wasmPaths = "https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/";
+ort.env.wasm.simd = false;
 setWasmPaths(
     'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-wasm/dist/'
 );
+
+// const executionProviders = ['webgpu', 'webgl', 'wasm']
+// const executionProviders = ['webgpu', 'wasm']
+const executionProviders = ['wasm']
+// const executionProviders = ['webgpu']
 
 let vggishModelLoaded: boolean = false;
 let featureExtractorPath: string;
@@ -26,6 +37,7 @@ async function setFeatureExtractor(modelPath: string){
 // Runs feature extractor
 async function runFeatureExtractor(audioBuffer: AudioBuffer) {
     console.log("Audio received for processing.")
+    // console.log("all 3 execution providers enabled")
 
     if (!vggishModelLoaded) {
         console.log('VGGish model path has not been set. Please use setFeatureExtractor(modelPath)');
@@ -37,34 +49,46 @@ async function runFeatureExtractor(audioBuffer: AudioBuffer) {
 
     if (preprocessedData) {
         console.log("Running feature extraction")
+        let inferenceStartTime = performance.now();
         const ortOutputsList = await runInferenceSequence(preprocessedData);
+        let inferenceEndTime = performance.now();
 
-        const pprocModelPath = '../pproc.onnx';
-        const pprocSession = await ort.InferenceSession.create(pprocModelPath);
+        console.log(`Time taken for inference (cold boot): ${inferenceEndTime - inferenceStartTime} milliseconds`);
 
-        let ortOutputsTensor;
-        if (ortOutputsList) ortOutputsTensor = tf.tensor(ortOutputsList);
-
-        if (ortOutputsTensor !== undefined) {
-            const pprocInputArray = Array.from(ortOutputsTensor.dataSync());
-            const pprocInputName = pprocSession.inputNames[0];
-            const pprocInputTensor = new ort.Tensor('float32', pprocInputArray, ortOutputsTensor.shape);
-            const pprocInputs = { [pprocInputName]: pprocInputTensor };
-            console.log("Running feature extraction postprocess")
-            const pprocOutputs = await pprocSession.run(pprocInputs);
-
-            const pprocOutput = pprocOutputs.output;
-            return pprocOutput;
-        } else {
-            console.log("Error with feature extraction.");
-            return null;
-        }
+        const output = ortOutputsList ? postprocess(ortOutputsList) : null;
+        return output
     } else {
         console.log("Error in preprocess.");
     }
 }
 
+async function postprocess(vggishOutput: number[][]) {
+    const pprocModelPath = '../pproc.onnx';
+    // const pprocSession = await InferenceSession.create(pprocModelPath);
+    const pprocSession = await ort.InferenceSession.create(pprocModelPath);
+
+    let ortOutputsTensor;
+    if (vggishOutput) ortOutputsTensor = tf.tensor(vggishOutput);
+
+    if (ortOutputsTensor !== undefined) {
+        const pprocInputArray = Array.from(ortOutputsTensor.dataSync());
+        const pprocInputName = pprocSession.inputNames[0];
+        const pprocInputTensor = new ort.Tensor('float32', pprocInputArray, ortOutputsTensor.shape);
+        // const pprocInputTensor = new Tensor('float32', pprocInputArray, ortOutputsTensor.shape);
+        const pprocInputs = { [pprocInputName]: pprocInputTensor };
+        console.log("Running feature extraction postprocess")
+        const pprocOutputs = await pprocSession.run(pprocInputs);
+
+        const pprocOutput = pprocOutputs.output;
+        return pprocOutput;
+    } else {
+        console.log("Error with feature extraction.");
+        return null;
+    }
+}
+
 // Runs the classifier model
+// async function runClassifier(inputData: ortCore.Tensor) {
 async function runClassifier(inputData: ort.Tensor) {
     console.log("Running classifier inference")
     const bgSession = await ort.InferenceSession.create(classifierPath);
@@ -86,12 +110,15 @@ async function runClassifier(inputData: ort.Tensor) {
 // Runs VGGish inference in series
 async function runInferenceSequence(inputData: tf.Tensor4D): Promise<number[][] | null> {
     try {
-        const session = await ort.InferenceSession.create(featureExtractorPath);
+        // const session = await ort.InferenceSession.create(featureExtractorPath);
+        // const session = await InferenceSession.create(featureExtractorPath, {executionMode: "parallel", executionProviders: executionProviders});
+        const session = await ort.InferenceSession.create(featureExtractorPath, {executionMode: "parallel", executionProviders: executionProviders});
         
         const [batchSize, channels, height, width] = inputData.shape;
 
         const ortOutputsList: number[][] = [];
 
+        let inferenceStartTime = performance.now();
         for (let batch = 0; batch < batchSize; batch++) {
             const input_data_batch = inputData.slice([batch, 0, 0, 0], [1, 1, height, width]);
             const input_data_onnx = input_data_batch.transpose([0, 2, 1, 3]).reshape([1, 64, 96]);
@@ -99,6 +126,7 @@ async function runInferenceSequence(inputData: tf.Tensor4D): Promise<number[][] 
 
             const inputDims = [1, 64, 96];
             const inputTensor = new ort.Tensor('float32', inputArray, inputDims);
+            // const inputTensor = new Tensor('float32', inputArray, inputDims);
 
             const feeds = {
                 'melspectrogram': inputTensor,
@@ -113,7 +141,11 @@ async function runInferenceSequence(inputData: tf.Tensor4D): Promise<number[][] 
 
             ortOutputsList.push(outputArray);
         }
+        let inferenceEndTime = performance.now();
 
+        console.log(`Hot inference time: ${inferenceEndTime - inferenceStartTime} milliseconds`);
+        console.log("ort output:")
+        console.log(ortOutputsList)
         return ortOutputsList;
     } catch (error) {
         console.error('Error during inference:', error);
@@ -463,4 +495,4 @@ async function preprocess(audioBuffer: AudioBuffer) {
     }
 }
 
-export { setFeatureExtractor, runFeatureExtractor, setClassifier, runClassifier }
+export { setFeatureExtractor, runFeatureExtractor, setClassifier, runClassifier, preprocess, postprocess }
