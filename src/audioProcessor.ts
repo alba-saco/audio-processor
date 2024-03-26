@@ -82,7 +82,6 @@ setWasmPaths(
     'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-wasm/dist/'
 );
 
-let vggishModel: tf.GraphModel;
 let postprocessorModel: tf.GraphModel;
 let voiceModel: tf.GraphModel;
 let reverbModel: tf.GraphModel;
@@ -245,16 +244,18 @@ export class VggishModel {
 
     predict = async (inputData: tf.Tensor<tf.Rank>): Promise<tf.Tensor<tf.Rank> | tf.Tensor<tf.Rank>[]> =>{
         const output = await this.model?.execute(inputData);
-        return output
+        return output ?? [];
     }
 }
+
+let vggishModel: VggishModel;
 
 
 async function init(){
     initializeTensorFlow();
 
-    vggishModel = await tf.loadGraphModel('/models/vggish-tfjs/model.json');
-    // vggishModel = new VggishModel();
+    // vggishModel = await tf.loadGraphModel('/models/vggish-tfjs/model.json');
+    vggishModel = new VggishModel();
     postprocessorModel = await tf.loadGraphModel('/models/pproc-tfjs/model.json');
     voiceModel = await tf.loadGraphModel('/models/vnv-tfjs/model.json');
     reverbModel = await tf.loadGraphModel('/models/reverb-tfjs/model.json');
@@ -739,6 +740,7 @@ async function runFeatureExtraction(audioBuffer: AudioBuffer) {
       }
 
       const [batchSize, channels, height, width] = inputData.shape;
+      console.log("starting feature extraction")
 
       for (let batch = 0; batch < batchSize; batch++) {
           // Assuming input_data is a 3D tensor (similar to permute(2, 1, 0) in Python)
@@ -747,7 +749,8 @@ async function runFeatureExtraction(audioBuffer: AudioBuffer) {
           const inputDataTfjs = inputDataBatch.transpose([0, 2, 1, 3]).reshape([1, 64, 96]);
 
           // Run inference using the TensorFlow.js model
-          const outputTensor = vggishModel.execute(inputDataTfjs);
+          //const outputTensor = vggishModel.execute(inputDataTfjs);
+          const outputTensor = await vggishModel.predict(inputDataTfjs);
 
           // Convert the output tensor to a flat array
           let outputArray;
@@ -762,8 +765,8 @@ async function runFeatureExtraction(audioBuffer: AudioBuffer) {
           // Push the output to the list
           outputs.push(outputArray);
       }
+      console.log("outputs obtained")
       console.log(outputs)
-
 
       const outputsTensor = tf.tensor(outputs);
       const flattenedOutputsTensor = outputsTensor.reshape([-1, 128]);
