@@ -601,7 +601,7 @@ async function runClassifier(audioBuffer: AudioBuffer) {
       if (vnvDetectedClass === 2) {
           voice_result = "spoken voice";
       } else {
-          voice_result = "no voice";
+          voice_result = "not useable";
       }
     }
 
