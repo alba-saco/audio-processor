@@ -45,8 +45,8 @@ module.exports = {
             },
           ],
         },
-        { test:/models\/.*\.bin/, type:"asset/inline"},
-        { test:/models\/.*\.json/, type:"asset/source"}   
+        // { test:/models\/.*\.bin/, type:"asset/inline"},
+        // { test:/models\/.*\.json/, type:"asset/source"}   
       ],
     },
     resolve: {
