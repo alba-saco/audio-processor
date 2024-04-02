@@ -14,9 +14,9 @@ module.exports = {
     plugins: [
         new CopyWebpackPlugin({
             patterns: [
-                { from: 'node_modules/onnxruntime-web/dist/**/*.wasm', to: 'onnxruntime-web/dist/[name][ext]' },
+                // { from: 'node_modules/onnxruntime-web/dist/**/*.wasm', to: 'onnxruntime-web/dist/[name][ext]' },
                 { from: 'node_modules/@tensorflow/tfjs-backend-wasm/dist/*.wasm', to: '@tensorflow/tfjs-backend-wasm/[name][ext]'},
-                { from: 'node_modules/onnxruntime-web/dist/ort.webgpu.min.js', to: 'onnxruntime-web/dist/' }
+                // { from: 'node_modules/onnxruntime-web/dist/ort.webgpu.min.js', to: 'onnxruntime-web/dist/' }
             ],
         }),
     ],
@@ -45,6 +45,8 @@ module.exports = {
             },
           ],
         },
+        // { test:/models\/.*\.bin/, type:"asset/inline"},
+        // { test:/models\/.*\.json/, type:"asset/source"}   
       ],
     },
     resolve: {

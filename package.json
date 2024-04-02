@@ -1,6 +1,6 @@
 {
   "name": "web-audio-classifier",
-  "version": "1.0.0",
+  "version": "1.1.1",
   "sideEffects": [
     "./src/audioProcessor.ts"
   ],
@@ -8,7 +8,7 @@
   "types": "dist/audioProcessor.d.ts",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "build": "webpack --config webpack.config.js"
+    "build": "NODE_OPTIONS='--max-old-space-size=4096' webpack --config webpack.config.js"
   },
   "paths": [
     "src",

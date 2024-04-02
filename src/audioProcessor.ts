@@ -1,156 +1,36 @@
+declare global {
+    interface Window { webkitAudioContext: typeof AudioContext }
+  }
+  
 import {setWasmPaths} from "@tensorflow/tfjs-backend-wasm"
-
-import * as ort from 'onnxruntime-web';
-// import * as ortCore from 'onnxruntime-web';
-// import * as ort from 'onnxruntime-web/webgpu';
 import * as tf from '@tensorflow/tfjs';
 import * as LibSampleRate from '@alexanderolsen/libsamplerate-js';
 
-// import { Tensor, InferenceSession } from 'onnxruntime-web/webgpu';
-
-ort.env.wasm.numThreads = 1;
-ort.env.remoteModels = false;
-ort.env.wasm.wasmPaths = "https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/";
-ort.env.wasm.simd = false;
 setWasmPaths(
     'https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-wasm/dist/'
 );
 
-// const executionProviders = ['webgpu', 'webgl', 'wasm']
-// const executionProviders = ['webgpu', 'wasm']
-const executionProviders = ['wasm']
-// const executionProviders = ['webgpu']
+let vggishModel: tf.GraphModel;
+let postprocessorModel: tf.GraphModel;
+let voiceModel: tf.GraphModel;
+let reverbModel: tf.GraphModel;
 
-let vggishModelLoaded: boolean = false;
-let featureExtractorPath: string;
-let classifierPath: string;
+async function init(_vggishModel: tf.GraphModel, _postprocessorModel: tf.GraphModel, _voiceModel: tf.GraphModel, _reverbModel: tf.GraphModel){
+    console.time('tfjs init')
+    initializeTensorFlow();
+    console.timeEnd('tfjs init')
 
-function setClassifier(modelPath: string) {
-    classifierPath = modelPath;
+    vggishModel = _vggishModel;
+    postprocessorModel = _postprocessorModel;
+    voiceModel = _voiceModel;
+    reverbModel = _reverbModel;
 }
 
-async function setFeatureExtractor(modelPath: string){
-    featureExtractorPath = modelPath;
-    vggishModelLoaded = true;
-}
-
-// Runs feature extractor
-async function runFeatureExtractor(audioBuffer: AudioBuffer) {
-    console.log("Audio received for processing.")
-    // console.log("all 3 execution providers enabled")
-
-    if (!vggishModelLoaded) {
-        console.log('VGGish model path has not been set. Please use setFeatureExtractor(modelPath)');
-        return
-    }
-
-    console.log("Running preprocess")
-    const preprocessedData = (await preprocess(audioBuffer)) as tf.Tensor4D;
-
-    if (preprocessedData) {
-        console.log("Running feature extraction")
-        let inferenceStartTime = performance.now();
-        const ortOutputsList = await runInferenceSequence(preprocessedData);
-        let inferenceEndTime = performance.now();
-
-        console.log(`Time taken for inference (cold boot): ${inferenceEndTime - inferenceStartTime} milliseconds`);
-
-        const output = ortOutputsList ? postprocess(ortOutputsList) : null;
-        return output
-    } else {
-        console.log("Error in preprocess.");
-    }
-}
-
-async function postprocess(vggishOutput: number[][]) {
-    const pprocModelPath = '../pproc.onnx';
-    // const pprocSession = await InferenceSession.create(pprocModelPath);
-    const pprocSession = await ort.InferenceSession.create(pprocModelPath);
-
-    let ortOutputsTensor;
-    if (vggishOutput) ortOutputsTensor = tf.tensor(vggishOutput);
-
-    if (ortOutputsTensor !== undefined) {
-        const pprocInputArray = Array.from(ortOutputsTensor.dataSync());
-        const pprocInputName = pprocSession.inputNames[0];
-        const pprocInputTensor = new ort.Tensor('float32', pprocInputArray, ortOutputsTensor.shape);
-        // const pprocInputTensor = new Tensor('float32', pprocInputArray, ortOutputsTensor.shape);
-        const pprocInputs = { [pprocInputName]: pprocInputTensor };
-        console.log("Running feature extraction postprocess")
-        const pprocOutputs = await pprocSession.run(pprocInputs);
-
-        const pprocOutput = pprocOutputs.output;
-        return pprocOutput;
-    } else {
-        console.log("Error with feature extraction.");
-        return null;
-    }
-}
-
-// Runs the classifier model
-// async function runClassifier(inputData: ortCore.Tensor) {
-async function runClassifier(inputData: ort.Tensor) {
-    console.log("Running classifier inference")
-    const bgSession = await ort.InferenceSession.create(classifierPath);
-
-    const bgInputArray = inputData.data instanceof Float32Array ? Array.from(new Float32Array(inputData.data.buffer)) : [];
-    const bgInputName = bgSession.inputNames[0];
-
-    const bgInputTensor = new ort.Tensor('float32', bgInputArray, inputData.dims);
-    const bgInputs = { [bgInputName]: bgInputTensor };
-    const bgOutput = await bgSession.run(bgInputs);
-
-    if (!bgOutput) {
-        throw new Error('Classifier output is null or undefined');
-    }
-
-    return bgOutput
-}
-
-// Runs VGGish inference in series
-async function runInferenceSequence(inputData: tf.Tensor4D): Promise<number[][] | null> {
-    try {
-        // const session = await ort.InferenceSession.create(featureExtractorPath);
-        // const session = await InferenceSession.create(featureExtractorPath, {executionMode: "parallel", executionProviders: executionProviders});
-        const session = await ort.InferenceSession.create(featureExtractorPath, {executionMode: "parallel", executionProviders: executionProviders});
-        
-        const [batchSize, channels, height, width] = inputData.shape;
-
-        const ortOutputsList: number[][] = [];
-
-        let inferenceStartTime = performance.now();
-        for (let batch = 0; batch < batchSize; batch++) {
-            const input_data_batch = inputData.slice([batch, 0, 0, 0], [1, 1, height, width]);
-            const input_data_onnx = input_data_batch.transpose([0, 2, 1, 3]).reshape([1, 64, 96]);
-            const inputArray = Array.from(input_data_onnx.dataSync());
-
-            const inputDims = [1, 64, 96];
-            const inputTensor = new ort.Tensor('float32', inputArray, inputDims);
-            // const inputTensor = new Tensor('float32', inputArray, inputDims);
-
-            const feeds = {
-                'melspectrogram': inputTensor,
-            };
-
-            const results = await session.run(feeds);
-            const outputTensor = results.embeddings;
-            let outputArray: number[] = [];
-            for (let i = 0; i < outputTensor.data.length; i++) {
-                outputArray.push(Number(outputTensor.data[i]));
-            }
-
-            ortOutputsList.push(outputArray);
-        }
-        let inferenceEndTime = performance.now();
-
-        console.log(`Hot inference time: ${inferenceEndTime - inferenceStartTime} milliseconds`);
-        console.log("ort output:")
-        console.log(ortOutputsList)
-        return ortOutputsList;
-    } catch (error) {
-        console.error('Error during inference:', error);
-        return null;
-    }
+async function initializeTensorFlow(): Promise<void> {
+    const backend = 'gpu' in navigator ? 'webgpu' : 'webgl';
+    await tf.setBackend(backend);
+    await tf.ready();
+    console.log(`Using TensorFlow backend: ${backend}`);
 }
 
 async function preprocess(audioBuffer: AudioBuffer) {
@@ -165,49 +45,6 @@ async function preprocess(audioBuffer: AudioBuffer) {
         EXAMPLE_WINDOW_SECONDS: 0.96,
         EXAMPLE_HOP_SECONDS: 0.96,
     };
-
-    // Converts audio waveform into array of examples for VGGish
-    async function waveformToExamples(data: AudioBuffer, sampleRate: number) {
-        if (data && data.length) {
-            // Convert to mono
-            const mergedData = mergeChannels(data);
-
-            const audioCtx = new window.AudioContext();
-            const dataBuffer = audioCtx.createBuffer(1, mergedData.length, vggishParams.SAMPLE_RATE);
-            dataBuffer.getChannelData(0).set(mergedData);
-            data = dataBuffer;
-
-            if (sampleRate !== vggishParams.SAMPLE_RATE) {
-                // Resample to the rate assumed by VGGish
-                const resampledData = await resample(data.getChannelData(0), sampleRate, vggishParams.SAMPLE_RATE);
-
-                const audioCtx = new window.AudioContext();
-                const dataBuffer = audioCtx.createBuffer(1, resampledData.length, vggishParams.SAMPLE_RATE);
-                dataBuffer.getChannelData(0).set(resampledData);
-                data = dataBuffer;
-            }
-            // Compute log mel spectrogram features
-            const logMel = await computeLogMelSpectrogram(data.getChannelData(0), vggishParams.SAMPLE_RATE);
-
-            if (logMel) { 
-                // Frame features into examples  
-                const featuresSampleRate = 1.0 / vggishParams.STFT_HOP_LENGTH_SECONDS;
-                const exampleWindowLength = Math.round(vggishParams.EXAMPLE_WINDOW_SECONDS * featuresSampleRate);
-                const exampleHopLength = Math.round(vggishParams.EXAMPLE_HOP_SECONDS * featuresSampleRate);
-                const logMelExamples = frame3d(logMel, exampleWindowLength, exampleHopLength);
-
-                const logMelTensor = tf.tensor(logMelExamples, undefined, 'float32');
-
-                const expandedTensor = logMelTensor.expandDims(1);
-                return expandedTensor;
-            } else {
-                console.log("Error computing Log Mel Spectrogram.");
-            }
-        } else {
-            console.log("Invalid or undefined data received.");
-            return null;
-        }
-    }
 
     // Converts to mono. If input is already mono it will remain unchanged
     function mergeChannels(audioBuffer: AudioBuffer): Float32Array {
@@ -245,6 +82,137 @@ async function preprocess(audioBuffer: AudioBuffer) {
             console.error("Resample error: ", error);
             throw error;
         }
+    }
+
+    function calculateRMS(audioData: Float32Array, hopSize: number) {
+        const windowSize = 2048;
+        const rms = [];
+    
+        for (let i = 0; i < audioData.length; i += hopSize) {
+            const window = audioData.slice(i, i + windowSize);
+            const sum = window.reduce((acc, val) => acc + (val * val), 0);
+            const mean = sum / window.length;
+            const rmsValue = Math.sqrt(mean);
+            rms.push(rmsValue);
+        }
+    
+        return rms;
+    }
+    
+    function calculateRmsT(rms: number[], sampleRate: number, hopSize: number) {
+        const numFrames = rms.length;
+        const frameDuration = hopSize / sampleRate;
+        const rms_t = new Float32Array(numFrames);
+    
+        for (let i = 0; i < numFrames; i++) {
+            rms_t[i] = i * frameDuration;
+        }
+    
+        return rms_t;
+    }
+    
+    function findNonsilentIntervals(rms: number[], threshold: number) {
+        const nonsilentIntervals = [];
+        for (let i = 0; i < rms.length; i++) {
+            if (rms[i] > threshold) {
+                nonsilentIntervals.push(i);
+            }
+        }
+        return nonsilentIntervals;
+    }
+    
+    function findContiguousIntervals(nonsilentIndices: number[]) {
+        const contiguousIntervals = [];
+        let buffer = [];
+    
+        for (let i = 0; i < nonsilentIndices.length - 1; i++) {
+            buffer.push(nonsilentIndices[i]);
+    
+            // Check if the next index is not contiguous
+            if (nonsilentIndices[i] + 1 !== nonsilentIndices[i + 1]) {
+                contiguousIntervals.push(buffer);
+                buffer = [];
+            }
+        }
+    
+        // Add the last interval if buffer is not empty
+        if (buffer.length > 0) {
+            contiguousIntervals.push(buffer);
+        }
+    
+        return contiguousIntervals;
+    }
+    
+    
+    function concatenateIntervals(intervals: number[][], audioData: Float32Array, sampleRate: number, rmsT: Float32Array) {
+        const start_times = intervals.map(interval => rmsT[interval[0]]);
+        const end_times = intervals.map(interval => rmsT[interval[interval.length - 1]]);
+    
+        const startSamples = start_times.map(time => Math.floor(time * sampleRate));
+        const endSamples = end_times.map(time => Math.ceil(time * sampleRate));
+    
+        let numNonsilentSamples = 0;
+        for (let i = 0; i < startSamples.length; i++) {
+            numNonsilentSamples += endSamples[i] - startSamples[i];
+        }
+    
+        const nonsilentAudio = new Float32Array(numNonsilentSamples);
+        let writeStart = 0;
+    
+        intervals.forEach((interval, i) => {
+            const startSample = startSamples[i];
+            const endSample = endSamples[i];
+            const intervalNumSamples = endSample - startSample;
+            const intervalAudioData = audioData.subarray(startSample, endSample);
+            nonsilentAudio.set(intervalAudioData, writeStart);
+            writeStart += intervalNumSamples;
+        });
+    
+        return nonsilentAudio;
+    }
+
+    async function removeSilence(audioBuffer: AudioBuffer, sampleRate: number): Promise<AudioBuffer | null> {
+        const bufferSampleRate = audioBuffer.sampleRate;
+    
+        let audioData = mergeChannels(audioBuffer);
+        if (bufferSampleRate !== sampleRate) {
+            audioData = await resample(audioData, bufferSampleRate, sampleRate);
+        }
+    
+        // Define parameters for silence removal
+        const thresholdOfSilence = 0.0001;
+    
+        // Calculate RMS values
+        const hopSize = 512;
+        const rms = calculateRMS(audioData, hopSize);
+        const rmsT = calculateRmsT(rms, sampleRate, hopSize);
+    
+        // Find nonsilent intervals
+        const nonsilentIntervals = findNonsilentIntervals(rms, thresholdOfSilence);
+    
+        // Discard intervals below minimum duration
+        const filteredIntervals = findContiguousIntervals(nonsilentIntervals);
+    
+        // Check if there are any nonsilent intervals
+        if (filteredIntervals.length === 0) {
+            console.error("No nonsilent intervals found.");
+            return null; // Return null to indicate failure
+        }
+    
+        // Create a new audio buffer containing only nonsilent intervals
+        const nonsilentAudioData = concatenateIntervals(filteredIntervals, audioData, sampleRate, rmsT);
+    
+        if (nonsilentAudioData.length === 0) {
+            console.error("Nonsilent audio data is empty.");
+            return null; // Return null to indicate failure
+        }
+    
+        // Create an AudioBuffer from the nonsilent audio data
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const newAudioBuffer = audioCtx.createBuffer(1, nonsilentAudioData.length, sampleRate);
+        newAudioBuffer.getChannelData(0).set(nonsilentAudioData);
+    
+        return newAudioBuffer;
     }
 
     // Convert waveform to a log magnitude mel-frequency spectrogram
@@ -482,8 +450,35 @@ async function preprocess(audioBuffer: AudioBuffer) {
         return window;
     }
 
+    // Converts audio waveform into array of examples for VGGish
+    async function waveformToExamples(data: AudioBuffer, sampleRate: number) {
+        if (data && data.length) {
+            // Compute log mel spectrogram features
+            const logMel = await computeLogMelSpectrogram(data.getChannelData(0), vggishParams.SAMPLE_RATE);
+
+            if (logMel) { 
+                // Frame features into examples  
+                const featuresSampleRate = 1.0 / vggishParams.STFT_HOP_LENGTH_SECONDS;
+                const exampleWindowLength = Math.round(vggishParams.EXAMPLE_WINDOW_SECONDS * featuresSampleRate);
+                const exampleHopLength = Math.round(vggishParams.EXAMPLE_HOP_SECONDS * featuresSampleRate);
+                const logMelExamples = frame3d(logMel, exampleWindowLength, exampleHopLength);
+
+                const logMelTensor = tf.tensor(logMelExamples, undefined, 'float32');
+
+                const expandedTensor = logMelTensor.expandDims(1);
+                return expandedTensor;
+            } else {
+                console.log("Error computing Log Mel Spectrogram.");
+            }
+        } else {
+            console.log("Invalid or undefined data received.");
+            return null;
+        }
+    }
+
     try {
-        const spectrogram = await waveformToExamples(audioBuffer, audioBuffer.sampleRate);
+        const noSilenceAudioBuffer = await removeSilence(audioBuffer, 16000)
+        const spectrogram = noSilenceAudioBuffer? await waveformToExamples(noSilenceAudioBuffer, noSilenceAudioBuffer.sampleRate) : null;
 
         if (spectrogram) {
             return spectrogram;
@@ -495,4 +490,134 @@ async function preprocess(audioBuffer: AudioBuffer) {
     }
 }
 
-export { setFeatureExtractor, runFeatureExtractor, setClassifier, runClassifier, preprocess, postprocess }
+// Runs feature extractor
+async function runFeatureExtraction(audioBuffer: AudioBuffer) {
+    console.time('preprocess')
+    const inputData = await preprocess(audioBuffer);
+    console.timeEnd('preprocess')
+
+    console.time('vggish feature extraction')
+    try {
+      const outputs = [];
+
+      if (!inputData) {
+          throw new Error('inputData is undefined');
+      }
+
+      const [batchSize, channels, height, width] = inputData.shape;
+
+      for (let batch = 0; batch < batchSize; batch++) {
+          // Assuming input_data is a 3D tensor (similar to permute(2, 1, 0) in Python)
+          const inputDataBatch = inputData.slice([batch, 0, 0, 0], [1, 1, height, width]);
+
+          const inputDataTfjs = inputDataBatch.transpose([0, 2, 1, 3]).reshape([1, 64, 96]);
+
+          // Run inference using the TensorFlow.js model
+          const outputTensor = vggishModel.predict(inputDataTfjs);
+
+          // Convert the output tensor to a flat array
+          let outputArray;
+          if (outputTensor instanceof tf.Tensor) {
+              outputArray = Array.from(await outputTensor.data());
+          } else if (Array.isArray(outputTensor) && outputTensor.length > 0) {
+              outputArray = Array.from(await outputTensor[0].data());
+          } else {
+              throw new Error('Unexpected output from model execution');
+          }
+
+          // Push the output to the list
+          outputs.push(outputArray);
+      }
+      console.timeEnd('vggish feature extraction')
+
+      console.time('feature extraction postprocessing')
+      const outputsTensor = tf.tensor(outputs);
+      const flattenedOutputsTensor = outputsTensor.reshape([-1, 128]);
+
+      const pprocOutputTensor = postprocessorModel.predict(flattenedOutputsTensor);
+
+      const postProcessedOutput = (pprocOutputTensor as tf.Tensor).arraySync();
+      console.timeEnd('feature extraction postprocessing')
+      return postProcessedOutput;  
+    } catch (error) {
+      console.error('Error during inference:', error);
+      return null;
+    }
+}
+
+function mode(arr: number[]): number {
+    const counts: { [key: number]: number } = {}; // Define type for counts object
+
+    arr.forEach(val => {
+        counts[val] = (counts[val] || 0) + 1;
+    });
+
+    let maxCount = 0;
+    let modeValue: number | null = null;
+    Object.entries(counts).forEach(([key, count]) => {
+        const numKey = parseInt(key);
+        if (count > maxCount) {
+            maxCount = count;
+            modeValue = numKey;
+        }
+    });
+
+    return modeValue!;
+  }
+
+async function runVoiceModel(input: tf.Tensor): Promise<number> {
+    const vnvOut = voiceModel.predict(input);
+
+    const vnvPredictionsTensor = tf.argMax((vnvOut as tf.Tensor), 1);
+    const vnvPredictionsArray = await vnvPredictionsTensor.array();
+
+    const vnvDetectedClass = mode(vnvPredictionsArray as number[]);
+
+    return vnvDetectedClass;
+}
+
+async function runReverbModel(input: tf.Tensor): Promise<number> {
+    const reverbOut = reverbModel.predict(input);
+
+    const reverbPredictionsTensor = tf.argMax((reverbOut as tf.Tensor), 1);
+    const reverbPredictionsArray = await reverbPredictionsTensor.array();
+    const reverbDetectedClass = mode(reverbPredictionsArray as number[]);
+
+    return reverbDetectedClass;
+}
+
+// Runs the classifier model
+async function runClassifier(audioBuffer: AudioBuffer) {
+    const vggishOut = await runFeatureExtraction(audioBuffer)
+    const classifiersInputTensor = tf.tensor(vggishOut as number[][]).reshape([-1, 128]);
+
+    console.time('voice model')
+    const vnvDetectedClass = await runVoiceModel(classifiersInputTensor);
+    console.timeEnd('voice model')
+    console.log("Voice model detected class: ", vnvDetectedClass)
+    let voice_result: string = "singing voice";
+
+    if (vnvDetectedClass) {
+      if (vnvDetectedClass === 2) {
+          voice_result = "spoken voice";
+      } else {
+          voice_result = "not useable";
+      }
+    }
+
+    let messages: string[] = [`Detected ${voice_result}`];
+
+    if(vnvDetectedClass === 0) {
+      console.time('reverb model')
+      const reverbDetectedClass = await runReverbModel(classifiersInputTensor)
+      console.timeEnd('reverb model')
+      console.log("Reverb model detected class: ", reverbDetectedClass)
+      
+      let reverb_result: string = reverbDetectedClass ? "reverb" : "no reverb";
+      messages.push(`Detected ${reverb_result}`);
+    }
+
+    return messages
+}
+
+export {init, runClassifier}
