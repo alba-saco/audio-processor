@@ -17,7 +17,7 @@ let reverbModel: tf.GraphModel;
 
 async function init(_vggishModel: tf.GraphModel, _postprocessorModel: tf.GraphModel, _voiceModel: tf.GraphModel, _reverbModel: tf.GraphModel){
     console.time('tfjs init')
-    initializeTensorFlow();
+    await initializeTensorFlow();
     console.timeEnd('tfjs init')
 
     vggishModel = _vggishModel;
