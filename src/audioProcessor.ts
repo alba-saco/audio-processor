@@ -15,13 +15,15 @@ let postprocessorModel: tf.GraphModel;
 let voiceModel: tf.GraphModel;
 let reverbModel: tf.GraphModel;
 
-async function init(vggishModel: tf.GraphModel, postprocessorModel: tf.GraphModel, voiceModel: tf.GraphModel, reverbModel: tf.GraphModel){
+async function init(_vggishModel: tf.GraphModel, _postprocessorModel: tf.GraphModel, _voiceModel: tf.GraphModel, _reverbModel: tf.GraphModel){
+    console.time('tfjs init')
     initializeTensorFlow();
+    console.timeEnd('tfjs init')
 
-    vggishModel = vggishModel;
-    postprocessorModel = postprocessorModel;
-    voiceModel = voiceModel;
-    reverbModel = reverbModel;
+    vggishModel = _vggishModel;
+    postprocessorModel = _postprocessorModel;
+    voiceModel = _voiceModel;
+    reverbModel = _reverbModel;
 }
 
 async function initializeTensorFlow(): Promise<void> {
@@ -490,9 +492,11 @@ async function preprocess(audioBuffer: AudioBuffer) {
 
 // Runs feature extractor
 async function runFeatureExtraction(audioBuffer: AudioBuffer) {
-
+    console.time('preprocess')
     const inputData = await preprocess(audioBuffer);
+    console.timeEnd('preprocess')
 
+    console.time('vggish feature extraction')
     try {
       const outputs = [];
 
@@ -501,7 +505,6 @@ async function runFeatureExtraction(audioBuffer: AudioBuffer) {
       }
 
       const [batchSize, channels, height, width] = inputData.shape;
-      console.log("starting feature extraction")
 
       for (let batch = 0; batch < batchSize; batch++) {
           // Assuming input_data is a 3D tensor (similar to permute(2, 1, 0) in Python)
@@ -510,7 +513,6 @@ async function runFeatureExtraction(audioBuffer: AudioBuffer) {
           const inputDataTfjs = inputDataBatch.transpose([0, 2, 1, 3]).reshape([1, 64, 96]);
 
           // Run inference using the TensorFlow.js model
-        //   const outputTensor = vggishModel.execute(inputDataTfjs);
           const outputTensor = vggishModel.predict(inputDataTfjs);
 
           // Convert the output tensor to a flat array
@@ -526,15 +528,16 @@ async function runFeatureExtraction(audioBuffer: AudioBuffer) {
           // Push the output to the list
           outputs.push(outputArray);
       }
-      console.log("outputs obtained")
-      console.log(outputs)
+      console.timeEnd('vggish feature extraction')
 
+      console.time('feature extraction postprocessing')
       const outputsTensor = tf.tensor(outputs);
       const flattenedOutputsTensor = outputsTensor.reshape([-1, 128]);
 
       const pprocOutputTensor = postprocessorModel.predict(flattenedOutputsTensor);
 
       const postProcessedOutput = (pprocOutputTensor as tf.Tensor).arraySync();
+      console.timeEnd('feature extraction postprocessing')
       return postProcessedOutput;  
     } catch (error) {
       console.error('Error during inference:', error);
@@ -588,7 +591,10 @@ async function runClassifier(audioBuffer: AudioBuffer) {
     const vggishOut = await runFeatureExtraction(audioBuffer)
     const classifiersInputTensor = tf.tensor(vggishOut as number[][]).reshape([-1, 128]);
 
+    console.time('voice model')
     const vnvDetectedClass = await runVoiceModel(classifiersInputTensor);
+    console.timeEnd('voice model')
+    console.log("Voice model detected class: ", vnvDetectedClass)
     let voice_result: string = "singing voice";
 
     if (vnvDetectedClass) {
@@ -602,7 +608,10 @@ async function runClassifier(audioBuffer: AudioBuffer) {
     let messages: string[] = [`Detected ${voice_result}`];
 
     if(vnvDetectedClass === 0) {
+      console.time('reverb model')
       const reverbDetectedClass = await runReverbModel(classifiersInputTensor)
+      console.timeEnd('reverb model')
+      console.log("Reverb model detected class: ", reverbDetectedClass)
       
       let reverb_result: string = reverbDetectedClass ? "reverb" : "no reverb";
       messages.push(`Detected ${reverb_result}`);
