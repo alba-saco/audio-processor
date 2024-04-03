@@ -544,10 +544,7 @@ async function runFeatureExtraction(audioBuffer: AudioBuffer) {
 
           // Run inference using the TensorFlow.js model
           const outputTensorPromise = vggishModel.predict(inputDataTfjs) as tf.Tensor;
-          const outputTensor = await outputTensorPromise.data();
-
-          // Convert the output tensor to a flat array
-          let outputArray = Array.from(outputTensor);
+          const outputArray = await outputTensorPromise.array();
 
           // Push the output to the list
           outputs.push(outputArray);
