@@ -526,7 +526,6 @@ async function runFeatureExtraction(audioBuffer: AudioBuffer) {
     const inputData = await preprocess(audioBuffer);
     console.timeEnd('preprocess')
 
-    console.time('vggish feature extraction')
     try {
       const outputs = [];
 
@@ -536,6 +535,8 @@ async function runFeatureExtraction(audioBuffer: AudioBuffer) {
 
       const [batchSize, channels, height, width] = inputData.shape;
 
+      console.time('vggish feature extraction')
+      const outputPromises = [];
       for (let batch = 0; batch < batchSize; batch++) {
           // Assuming input_data is a 3D tensor (similar to permute(2, 1, 0) in Python)
           const inputDataBatch = inputData.slice([batch, 0, 0, 0], [1, 1, height, width]);
@@ -543,12 +544,10 @@ async function runFeatureExtraction(audioBuffer: AudioBuffer) {
           const inputDataTfjs = inputDataBatch.transpose([0, 2, 1, 3]).reshape([1, 64, 96]);
 
           // Run inference using the TensorFlow.js model
-          const outputTensorPromise = vggishModel.predict(inputDataTfjs) as tf.Tensor;
-          const outputArray = await outputTensorPromise.array();
-
-          // Push the output to the list
-          outputs.push(outputArray);
+          outputPromises.push((vggishModel.predict(inputDataTfjs) as tf.Tensor).array());
       }
+      const outputArrays = await Promise.all(outputPromises);
+      outputs.push(...outputArrays);
       console.timeEnd('vggish feature extraction')
 
       console.time('feature extraction postprocessing')
