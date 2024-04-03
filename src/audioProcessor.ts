@@ -15,16 +15,46 @@ let postprocessorModel: tf.GraphModel;
 let voiceModel: tf.GraphModel;
 let reverbModel: tf.GraphModel;
 
-async function init(_vggishModel: tf.GraphModel, _postprocessorModel: tf.GraphModel, _voiceModel: tf.GraphModel, _reverbModel: tf.GraphModel){
-    console.time('tfjs init')
-    await initializeTensorFlow();
-    console.timeEnd('tfjs init')
+// async function init(_vggishModel: tf.GraphModel, _postprocessorModel: tf.GraphModel, _voiceModel: tf.GraphModel, _reverbModel: tf.GraphModel){
+//     console.time('tfjs init')
+//     await initializeTensorFlow();
+//     console.timeEnd('tfjs init')
 
+//     vggishModel = _vggishModel;
+//     postprocessorModel = _postprocessorModel;
+//     voiceModel = _voiceModel;
+//     reverbModel = _reverbModel;
+// }
+
+interface ModelPaths {
+    vggishModelPath: string;
+    postprocessorModelPath: string;
+    voiceModelPath: string;
+    reverbModelPath: string;
+  }
+
+async function init(modelPaths: ModelPaths) {
+    console.time('tfjs init');
+    await initializeTensorFlow();
+    console.timeEnd('tfjs init');
+  
+    const vggishModelPromise = tf.loadGraphModel(modelPaths.vggishModelPath);
+    const postprocessorModelPromise = tf.loadGraphModel(modelPaths.postprocessorModelPath);
+    const voiceModelPromise = tf.loadGraphModel(modelPaths.voiceModelPath);
+    const reverbModelPromise = tf.loadGraphModel(modelPaths.reverbModelPath);
+  
+    const [_vggishModel, _postprocessorModel, _voiceModel, _reverbModel] = await Promise.all([
+      vggishModelPromise,
+      postprocessorModelPromise,
+      voiceModelPromise,
+      reverbModelPromise
+    ]);
+  
     vggishModel = _vggishModel;
     postprocessorModel = _postprocessorModel;
     voiceModel = _voiceModel;
     reverbModel = _reverbModel;
-}
+  }
 
 async function initializeTensorFlow(): Promise<void> {
     const backend = 'gpu' in navigator ? 'webgpu' : 'webgl';
@@ -620,4 +650,4 @@ async function runClassifier(audioBuffer: AudioBuffer) {
     return messages
 }
 
-export {init, runClassifier}
+export {init, runClassifier, ModelPaths}
