@@ -10,7 +10,7 @@ The audio is first run through a voice classifier model, which detects whether t
 ## How to use
 ### Import
 
-```import { init, runClassifier } from 'web-audio-classifier';```
+```import { init, runClassifier, ModelPaths } from 'web-audio-classifier';```
 
 ### Usage
 Prior to running the classifier, the model paths need to be set.
@@ -19,18 +19,14 @@ Prior to running the classifier, the model paths need to be set.
 
 To initialize the package, the model files need to be passed via the init function. For example:
 ```javascript
-const vggishModelPromise = tf.loadGraphModel('PATH_TO_MODELS_DIR/vggish-tfjs/model.json');
-const postprocessorModelPromise = tf.loadGraphModel('PATH_TO_MODELS_DIR/pproc-tfjs/model.json');
-const voiceModelPromise = tf.loadGraphModel('PATH_TO_MODELS_DIR/vnv-tfjs/model.json');
-const reverbModelPromise = tf.loadGraphModel('PATH_TO_MODELS_DIR/reverb-tfjs/model.json');
+const modelPaths: ModelPaths = {
+    vggishModelPath: 'PATH_TO_MODELS_DIR/vggish-tfjs/model.json',
+    postprocessorModelPath: 'PATH_TO_MODELS_DIR/pproc-tfjs/model.json',
+    voiceModelPath: 'PATH_TO_MODELS_DIR/vnv-tfjs/model.json',
+    reverbModelPath: 'PATH_TO_MODELS_DIR/reverb-tfjs/model.json'
+};
 
-Promise.all([vggishModelPromise, postprocessorModelPromise, voiceModelPromise, reverbModelPromise])
-    .then(([vggishModel, postprocessorModel, voiceModel, reverbModel]) => {
-        init(vggishModel, postprocessorModel, voiceModel, reverbModel);
-    })
-    .catch(error => {
-        console.error("Error loading models:", error);
-    });
+await init(modelPaths);
 ```
 Replacing ```PATH_TO_MODELS_DIR``` with the appropriate path to locate the directory.
 
