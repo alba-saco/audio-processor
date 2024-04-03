@@ -543,17 +543,11 @@ async function runFeatureExtraction(audioBuffer: AudioBuffer) {
           const inputDataTfjs = inputDataBatch.transpose([0, 2, 1, 3]).reshape([1, 64, 96]);
 
           // Run inference using the TensorFlow.js model
-          const outputTensor = vggishModel.predict(inputDataTfjs);
+          const outputTensorPromise = vggishModel.predict(inputDataTfjs) as tf.Tensor;
+          const outputTensor = await outputTensorPromise.data();
 
           // Convert the output tensor to a flat array
-          let outputArray;
-          if (outputTensor instanceof tf.Tensor) {
-              outputArray = Array.from(await outputTensor.data());
-          } else if (Array.isArray(outputTensor) && outputTensor.length > 0) {
-              outputArray = Array.from(await outputTensor[0].data());
-          } else {
-              throw new Error('Unexpected output from model execution');
-          }
+          let outputArray = Array.from(outputTensor);
 
           // Push the output to the list
           outputs.push(outputArray);
