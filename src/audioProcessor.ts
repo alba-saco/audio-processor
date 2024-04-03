@@ -556,7 +556,7 @@ async function runFeatureExtraction(audioBuffer: AudioBuffer) {
 
       const pprocOutputTensor = postprocessorModel.predict(flattenedOutputsTensor);
 
-      const postProcessedOutput = (pprocOutputTensor as tf.Tensor).arraySync();
+      const postProcessedOutput = await (pprocOutputTensor as tf.Tensor).array();
       console.timeEnd('feature extraction postprocessing')
       return postProcessedOutput;  
     } catch (error) {
