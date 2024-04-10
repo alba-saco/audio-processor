@@ -1,8 +1,19 @@
 # Web Audio Classifier
 
-## Description
+## Info
+### Description
 The web audio classifier runs a classification model to detect whether a user-submitted audio file is suitable for training a voice model.
 The audio is first run through a voice classifier model, which detects whether the submitted audio is singing voice or spoken voice. If the audio is instrumental or is voiced with an instrumental background, it will detect the audio as 'not useable'. If the model detects singing voice, it will then run the reverb classification model to detect whether or not there is reverb applied to the singing voice.
+
+### Performance
+It takes an average of 0.9 seconds to process a 10-second audio file on chrome using a GPU.
+
+### Models
+There are [4 models](https://console.cloud.google.com/storage/browser/voice-classifier-models) used in this package. The largest is the VGGish feature extractor, which is 275MB. The VGGish-FE postprocessor model is 84KB. The voice/non-voice and the reverb models are 5MB each.
+
+### "Good to Train" Output
+The voice quality classifier will identify whether acapella singing or spoken voice is detected. Anything that is not acapella speech or singing will be detected as not useable. If singing voice is detected, it will also detect the presence of reverb in the audio. Outputs from the ```runClassifier``` function that idenitify the audio as 'good to train' will either be ```['Detected singing voice', 'Detected no reverb']``` OR ```['Detected spoken voice']```.
+
 
 ## Installation
 ```npm install web-audio-processor```
